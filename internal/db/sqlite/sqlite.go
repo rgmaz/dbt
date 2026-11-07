@@ -118,11 +118,7 @@ func quoteIdentifier(part string) string {
 }
 
 func (c *Conn) withTimeout(ctx context.Context) (context.Context, context.CancelFunc) {
-	timeout := c.opts.QueryTimeout
-	if timeout <= 0 {
-		timeout = db.DefaultQueryTimeout
-	}
-	return context.WithTimeout(ctx, timeout)
+	return db.WithQueryTimeout(ctx, c.opts.QueryTimeout)
 }
 
 func resolvePath(path string) (string, error) {
