@@ -1,0 +1,34 @@
+# Build artifacts
+/bin/
+/dist/
+*.exe
+*.test
+*.out
+coverage.*
+profile.*
+
+# Local design and planning notes
+/docs/DESIGN.md
+
+# Environment and secrets
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+
+# Logs and runtime state
+*.log
+logs/
+tmp/
+
+# Editor and OS files
+.idea/
+.vscode/
+.DS_Store
+*.swp
+*.swo
+
+# Go workspace files (local tooling only)
+go.work
+go.work.sum
