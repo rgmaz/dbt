@@ -267,10 +267,9 @@ func buildConnection(index int, raw rawConnection, seenNames map[string]struct{}
 
 	dsn := strings.TrimSpace(raw.DSN)
 	dsnValid := false
-	switch {
-	case dsn == "":
+	if dsn == "" {
 		problemf("dsn is required")
-	default:
+	} else {
 		expanded, err := expandEnv(dsn, os.LookupEnv)
 		if err != nil {
 			problemf("%v", err)
