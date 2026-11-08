@@ -1,0 +1,40 @@
+public.users · table                                                                                                    
+                                                                                                                        
+Columns                                                                                                                 
+id  bigint  PK, NOT NULL                                                                                                
+email  text DEFAULT now()                                                                                               
+note  text  generated                                                                                                   
+  freeform                                                                                                              
+                                                                                                                        
+Indexes                                                                                                                 
+users_pkey  (primary, unique, btree)                                                                                    
+  id                                                                                                                    
+                                                                                                                        
+Foreign keys                                                                                                            
+users_team_fkey: team_id → public.teams(id)                                                                             
+  on delete CASCADE, on update NO ACTION                                                                                
+                                                                                                                        
+DDL                                                                                                                     
+CREATE TABLE public.users (                                                                                             
+  id bigint PRIMARY KEY,                                                                                                
+  email text                                                                                                            
+)                                                                                                                       
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
