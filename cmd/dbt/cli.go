@@ -46,7 +46,7 @@ DSN:
   postgres://... or postgresql://...   PostgreSQL
   sqlite:path or /path/to/file.db      SQLite
 
-Precedence: positional dsn > --connection > interactive picker (not yet available).
+Precedence: positional dsn > --connection > interactive picker (TTY).
 
 Exit codes: 0 success, 1 runtime/DB error, 2 usage/config error, 130 interrupted.
 `
@@ -66,6 +66,8 @@ type target struct {
 	dsn    string
 	source string
 }
+
+var errNoTarget = errors.New("no connection specified")
 
 func run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 	opts, err := parseArgs(args)
@@ -107,34 +109,41 @@ func run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 	}
 
 	resolved, err := resolveTarget(cfg, opts.dsn, opts.connection)
-	if err != nil {
+	switch {
+	case errors.Is(err, errNoTarget):
+		return runWithoutTarget(ctx, logger, opts, cfg, stdin, stdout, stderr)
+	case err != nil:
 		return fail(ctx, logger, stderr, exitUsage, err)
 	}
+
 	logger.Info("connection",
 		"source", resolved.source,
 		"kind", resolved.kind,
 		"target", dbtlog.RedactDSN(resolved.dsn),
 	)
 
-	connector, err := connectorFor(resolved.kind)
-	if err != nil {
-		return fail(ctx, logger, stderr, exitUsage, err)
+	if opts.check {
+		conn, _, err := openTarget(ctx, cfg, resolved)
+		if err != nil {
+			return fail(ctx, logger, stderr, exitError, err)
+		}
+		defer func() { _ = conn.Close() }()
+		return runCheck(ctx, logger, conn, resolved.kind, stdout, stderr)
 	}
 
-	conn, err := db.Open(ctx, connector, resolved.dsn, db.Options{
-		ReadOnly:     true,
-		QueryTimeout: cfg.QueryTimeout,
-	})
+	if !isTerminal(stdin) || !isTerminal(stdout) {
+		writef(stderr, "dbt: interactive mode requires a terminal; use --check for non-interactive use\n")
+		logger.Warn("interactive mode requires a terminal")
+		return exitError
+	}
+
+	conn, serverVersion, err := openTarget(ctx, cfg, resolved)
 	if err != nil {
 		return fail(ctx, logger, stderr, exitError, err)
 	}
 	defer func() { _ = conn.Close() }()
 
-	if opts.check {
-		return runCheck(ctx, logger, conn, resolved.kind, stdout, stderr)
-	}
-
-	return runInteractive(ctx, logger, opts, cfg, resolved, conn, stdin, stdout, stderr)
+	return runBrowser(ctx, logger, opts, cfg, resolved, serverVersion, stdin, stdout, stderr)
 }
 
 func parseArgs(args []string) (options, error) {
@@ -226,32 +235,52 @@ func resolveTarget(cfg *config.Config, dsnArg, profileName string) (target, erro
 		if !ok {
 			return target{}, fmt.Errorf("connection profile %q not found", profileName)
 		}
-		kind, err := kindForDriver(conn.Driver)
-		if err != nil {
-			return target{}, fmt.Errorf("connection profile %q: %w", profileName, err)
-		}
-
-		dsn := conn.DSN
-		if kind == db.KindSQLite {
-			parsedKind, parsedDSN, err := db.ParseDSN(dsn)
-			if err != nil {
-				return target{}, fmt.Errorf("connection profile %q: %w", profileName, err)
-			}
-			if parsedKind != db.KindSQLite {
-				return target{}, fmt.Errorf(
-					"connection profile %q: driver is sqlite but DSN is %s",
-					profileName, parsedKind,
-				)
-			}
-			dsn = parsedDSN
-		}
-		return target{kind: kind, dsn: dsn, source: "profile"}, nil
+		return targetForProfile(conn)
 	}
 
-	return target{}, errors.New(
-		"no connection specified: pass a DSN, use --connection, or configure a profile " +
-			"(the interactive picker is not implemented yet)",
-	)
+	return target{}, errNoTarget
+}
+
+func targetForProfile(conn config.Connection) (target, error) {
+	kind, err := kindForDriver(conn.Driver)
+	if err != nil {
+		return target{}, fmt.Errorf("connection profile %q: %w", conn.Name, err)
+	}
+
+	dsn := conn.DSN
+	if kind == db.KindSQLite {
+		parsedKind, parsedDSN, err := db.ParseDSN(dsn)
+		if err != nil {
+			return target{}, fmt.Errorf("connection profile %q: %w", conn.Name, err)
+		}
+		if parsedKind != db.KindSQLite {
+			return target{}, fmt.Errorf(
+				"connection profile %q: driver is sqlite but DSN is %s",
+				conn.Name, parsedKind,
+			)
+		}
+		dsn = parsedDSN
+	}
+
+	return target{kind: kind, dsn: dsn, source: "profile"}, nil
+}
+
+func profilesFromConfig(cfg *config.Config) ([]app.Profile, error) {
+	profiles := make([]app.Profile, 0, len(cfg.Connections))
+	for _, conn := range cfg.Connections {
+		resolved, err := targetForProfile(conn)
+		if err != nil {
+			return nil, err
+		}
+		profiles = append(profiles, app.Profile{
+			Name:   conn.Name,
+			Driver: conn.Driver,
+			Kind:   resolved.kind,
+			Detail: dbtlog.RedactDSN(conn.DSN),
+			DSN:    resolved.dsn,
+		})
+	}
+	return profiles, nil
 }
 
 func kindForDriver(driver string) (db.Kind, error) {
@@ -293,30 +322,61 @@ func runCheck(ctx context.Context, logger *slog.Logger, conn db.Conn, kind db.Ki
 	return exitOK
 }
 
-func runInteractive(
+func runWithoutTarget(
+	ctx context.Context,
+	logger *slog.Logger,
+	opts options,
+	cfg *config.Config,
+	stdin io.Reader,
+	stdout, stderr io.Writer,
+) int {
+	if opts.check {
+		return fail(ctx, logger, stderr, exitUsage,
+			errors.New("no connection specified: --check requires a DSN or --connection"))
+	}
+	if !isTerminal(stdin) || !isTerminal(stdout) {
+		return fail(ctx, logger, stderr, exitUsage,
+			errors.New("no connection specified: pass a DSN, use --connection, or run in a terminal to use the picker"))
+	}
+	return runPicker(ctx, logger, cfg, stdin, stdout, stderr)
+}
+
+func openTarget(ctx context.Context, cfg *config.Config, resolved target) (db.Conn, string, error) {
+	connector, err := connectorFor(resolved.kind)
+	if err != nil {
+		return nil, "", err
+	}
+
+	conn, err := db.Open(ctx, connector, resolved.dsn, db.Options{
+		ReadOnly:     true,
+		QueryTimeout: cfg.QueryTimeout,
+	})
+	if err != nil {
+		return nil, "", err
+	}
+
+	versionCtx, cancel := context.WithTimeout(ctx, db.DefaultConnectTimeout)
+	version, err := conn.ServerVersion(versionCtx)
+	cancel()
+	if err != nil {
+		_ = conn.Close()
+		return nil, "", err
+	}
+	return conn, version, nil
+}
+
+func runBrowser(
 	ctx context.Context,
 	logger *slog.Logger,
 	opts options,
 	cfg *config.Config,
 	resolved target,
-	conn db.Conn,
+	serverVersion string,
 	stdin io.Reader,
 	stdout, stderr io.Writer,
 ) int {
-	if !isTerminal(stdin) || !isTerminal(stdout) {
-		writef(stderr, "dbt: interactive mode requires a terminal; use --check for non-interactive use\n")
-		logger.Warn("interactive mode requires a terminal")
-		return exitError
-	}
-
-	versionCtx, cancel := context.WithTimeout(ctx, db.DefaultConnectTimeout)
-	serverVersion, err := conn.ServerVersion(versionCtx)
-	cancel()
-	if err != nil {
-		return fail(ctx, logger, stderr, exitError, err)
-	}
-
 	model := app.New(app.Options{
+		Context:    ctx,
 		Connection: connectionLabel(opts, resolved),
 		Kind:       resolved.kind,
 		Version:    serverVersion,
@@ -324,6 +384,60 @@ func runInteractive(
 		Theme:      cfg.Theme,
 	})
 
+	logger.Info("tui start", "mode", "browser", "kind", resolved.kind, "version", serverVersion)
+	return runProgram(ctx, logger, model, stdin, stdout, stderr)
+}
+
+func runPicker(
+	ctx context.Context,
+	logger *slog.Logger,
+	cfg *config.Config,
+	stdin io.Reader,
+	stdout, stderr io.Writer,
+) int {
+	profiles, err := profilesFromConfig(cfg)
+	if err != nil {
+		return fail(ctx, logger, stderr, exitUsage, err)
+	}
+
+	open := func(openCtx context.Context, profile app.Profile) (app.ConnectResult, error) {
+		logger.Info("connect", "profile", profile.Name, "kind", profile.Kind)
+		conn, version, err := openTarget(openCtx, cfg, target{
+			kind:   profile.Kind,
+			dsn:    profile.DSN,
+			source: "profile",
+		})
+		if err != nil {
+			return app.ConnectResult{}, err
+		}
+		return app.ConnectResult{
+			Conn:    conn,
+			Kind:    profile.Kind,
+			Version: version,
+			Label:   profile.Name,
+		}, nil
+	}
+
+	model := app.New(app.Options{
+		Context:    ctx,
+		Picker:     true,
+		Profiles:   profiles,
+		ConfigPath: cfg.Path(),
+		Open:       open,
+		Theme:      cfg.Theme,
+	})
+
+	logger.Info("tui start", "mode", "picker", "profiles", len(profiles), "config", cfg.Path())
+	return runProgram(ctx, logger, model, stdin, stdout, stderr)
+}
+
+func runProgram(
+	ctx context.Context,
+	logger *slog.Logger,
+	model app.Model,
+	stdin io.Reader,
+	stdout, stderr io.Writer,
+) int {
 	program := tea.NewProgram(
 		model,
 		tea.WithContext(ctx),
@@ -332,8 +446,14 @@ func runInteractive(
 		tea.WithOutput(stdout),
 	)
 
-	logger.Info("tui start", "kind", resolved.kind, "version", serverVersion)
-	if _, err := program.Run(); err != nil {
+	final, err := program.Run()
+	if closer, ok := final.(interface{ Close() error }); ok {
+		if closeErr := closer.Close(); closeErr != nil {
+			logger.Warn("close session", "error", dbtlog.Redact(closeErr.Error()))
+		}
+	}
+
+	if err != nil {
 		if errors.Is(err, tea.ErrProgramKilled) && ctx.Err() != nil {
 			writef(stderr, "dbt: interrupted\n")
 			logger.Warn("interrupted")

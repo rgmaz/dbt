@@ -1,6 +1,7 @@
 package app
 
 import (
+	"context"
 	"errors"
 	"strings"
 	"testing"
@@ -9,6 +10,7 @@ import (
 	"github.com/charmbracelet/lipgloss"
 
 	"github.com/rgmaz/dbt/internal/db"
+	"github.com/rgmaz/dbt/internal/db/dbtest"
 	"github.com/rgmaz/dbt/internal/tui/screen"
 )
 
@@ -157,6 +159,185 @@ func TestCapturesTextSuppressesGlobals(t *testing.T) {
 	if cmd == nil {
 		t.Fatal("ctrl+c must quit even while text is captured")
 	}
+}
+
+func TestPickerStartup(t *testing.T) {
+	m := pickerModel(func(context.Context, Profile) (ConnectResult, error) {
+		return ConnectResult{}, nil
+	})
+	m = resize(t, m, 100, 30)
+
+	if m.screen.ID() != screen.PickerScreen {
+		t.Fatalf("screen = %v, want picker", m.screen.ID())
+	}
+	view := m.View()
+	for _, want := range []string{"dbt · picker", "Connections", "local-pg", "postgres", "enter connect"} {
+		if !strings.Contains(view, want) {
+			t.Errorf("picker shell missing %q:\n%s", want, view)
+		}
+	}
+}
+
+func TestPickerOnboarding(t *testing.T) {
+	m := New(Options{
+		Picker:     true,
+		ConfigPath: "/home/user/.config/dbt/config.toml",
+		Open: func(context.Context, Profile) (ConnectResult, error) {
+			return ConnectResult{}, nil
+		},
+	})
+	m = resize(t, m, 80, 24)
+
+	view := m.View()
+	for _, want := range []string{
+		"No connections configured",
+		"[[connection]]",
+		"/home/user/.config/dbt/config.toml",
+	} {
+		if !strings.Contains(view, want) {
+			t.Errorf("onboarding shell missing %q:\n%s", want, view)
+		}
+	}
+}
+
+func TestPickerConnectSuccess(t *testing.T) {
+	conn := dbtest.NewFakeConn()
+	m := pickerModel(func(_ context.Context, profile Profile) (ConnectResult, error) {
+		return ConnectResult{
+			Conn:    conn,
+			Kind:    db.KindPostgres,
+			Version: "16.0 (fake)",
+			Label:   profile.Name,
+		}, nil
+	})
+	m = resize(t, m, 100, 30)
+
+	m, cmd := send(t, m, screen.ConnectRequestMsg{Profile: screen.PickerProfile{Name: "local-pg"}})
+	if cmd == nil {
+		t.Fatal("connect request did not schedule a command")
+	}
+	if !m.connecting {
+		t.Error("connecting state not set")
+	}
+
+	m, _ = send(t, m, cmd())
+	if m.screen.ID() != screen.BrowserScreen {
+		t.Fatalf("screen = %v, want browser", m.screen.ID())
+	}
+	if m.connecting {
+		t.Error("connecting state not cleared")
+	}
+
+	view := m.View()
+	for _, want := range []string{"local-pg", "postgres", "16.0 (fake)", "read-only", "Data"} {
+		if !strings.Contains(view, want) {
+			t.Errorf("browser after connect missing %q:\n%s", want, view)
+		}
+	}
+
+	if err := m.Close(); err != nil {
+		t.Fatalf("Close() error = %v", err)
+	}
+	if !hasCall(conn.Calls(), "Close") {
+		t.Error("session was not closed")
+	}
+}
+
+func TestPickerConnectFailure(t *testing.T) {
+	m := pickerModel(func(context.Context, Profile) (ConnectResult, error) {
+		return ConnectResult{}, errors.New("connection refused")
+	})
+	m = resize(t, m, 100, 30)
+
+	m, cmd := send(t, m, screen.ConnectRequestMsg{Profile: screen.PickerProfile{Name: "local-pg"}})
+	if cmd == nil {
+		t.Fatal("connect request did not schedule a command")
+	}
+	m, _ = send(t, m, cmd())
+
+	view := m.View()
+	for _, want := range []string{"Error", "connection refused", "esc: dismiss"} {
+		if !strings.Contains(view, want) {
+			t.Errorf("error modal missing %q:\n%s", want, view)
+		}
+	}
+	if m.screen.ID() != screen.PickerScreen {
+		t.Errorf("screen = %v, want picker after failure", m.screen.ID())
+	}
+	if m.connecting {
+		t.Error("connecting state not cleared after failure")
+	}
+
+	m, _ = send(t, m, tea.KeyMsg{Type: tea.KeyEsc})
+	_, retry := send(t, m, screen.ConnectRequestMsg{Profile: screen.PickerProfile{Name: "local-pg"}})
+	if retry == nil {
+		t.Error("retry after failure should schedule a command")
+	}
+}
+
+func TestPickerConnectIgnoresDuplicate(t *testing.T) {
+	m := pickerModel(func(context.Context, Profile) (ConnectResult, error) {
+		return ConnectResult{}, nil
+	})
+	m = resize(t, m, 100, 30)
+
+	m, cmd := send(t, m, screen.ConnectRequestMsg{Profile: screen.PickerProfile{Name: "local-pg"}})
+	if cmd == nil {
+		t.Fatal("connect request did not schedule a command")
+	}
+	if _, duplicate := send(t, m, screen.ConnectRequestMsg{Profile: screen.PickerProfile{Name: "local-pg"}}); duplicate != nil {
+		t.Error("duplicate connect request scheduled a command")
+	}
+}
+
+func TestPickerConnectCancelledOnQuit(t *testing.T) {
+	var got context.Context
+	m := pickerModel(func(ctx context.Context, _ Profile) (ConnectResult, error) {
+		got = ctx
+		return ConnectResult{}, ctx.Err()
+	})
+	m = resize(t, m, 100, 30)
+
+	m, cmd := send(t, m, screen.ConnectRequestMsg{Profile: screen.PickerProfile{Name: "local-pg"}})
+	if cmd == nil {
+		t.Fatal("connect request did not schedule a command")
+	}
+	if _, quitCmd := send(t, m, runeKey('q')); quitCmd == nil {
+		t.Fatal("q did not schedule quit")
+	}
+
+	_ = cmd()
+	if got == nil {
+		t.Fatal("open function was not called")
+	}
+	if !errors.Is(got.Err(), context.Canceled) {
+		t.Errorf("connect context error = %v, want context.Canceled", got.Err())
+	}
+}
+
+func pickerModel(open OpenFunc) Model {
+	return New(Options{
+		Context: context.Background(),
+		Picker:  true,
+		Profiles: []Profile{{
+			Name:   "local-pg",
+			Driver: "postgres",
+			Kind:   db.KindPostgres,
+			Detail: "postgres://app@localhost:5432/app",
+			DSN:    "postgres://app@localhost:5432/app",
+		}},
+		ConfigPath: "/home/user/.config/dbt/config.toml",
+		Open:       open,
+	})
+}
+
+func hasCall(calls []string, want string) bool {
+	for _, call := range calls {
+		if call == want {
+			return true
+		}
+	}
+	return false
 }
 
 func testModel() Model {

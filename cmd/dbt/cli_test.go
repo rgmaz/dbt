@@ -8,6 +8,9 @@ import (
 	"runtime"
 	"strings"
 	"testing"
+
+	"github.com/rgmaz/dbt/internal/config"
+	"github.com/rgmaz/dbt/internal/db"
 )
 
 func TestVersionAndHelp(t *testing.T) {
@@ -201,6 +204,81 @@ func TestNoConnection(t *testing.T) {
 	}
 	if !strings.Contains(stderr, "no connection specified") {
 		t.Errorf("stderr = %q, want no-connection error", stderr)
+	}
+}
+
+func TestNoConnectionNonInteractive(t *testing.T) {
+	code, stdout, stderr := runCLI(t, context.Background())
+	if code != exitUsage {
+		t.Fatalf("exit code = %d, want %d", code, exitUsage)
+	}
+	if stdout != "" {
+		t.Errorf("stdout = %q, want empty", stdout)
+	}
+	for _, want := range []string{"no connection specified", "picker"} {
+		if !strings.Contains(stderr, want) {
+			t.Errorf("stderr = %q, want %q", stderr, want)
+		}
+	}
+}
+
+func TestProfilesFromConfig(t *testing.T) {
+	sqlitePath := filepath.Join(t.TempDir(), "notes.db")
+	configPath := writeConfig(t, `
+[[connection]]
+name = "local-pg"
+driver = "postgres"
+dsn = "postgres://user:secret@localhost:5432/app?sslmode=disable"
+
+[[connection]]
+name = "notes"
+driver = "sqlite"
+dsn = "`+sqlitePath+`"
+`)
+
+	cfg, err := config.Load(configPath)
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+
+	profiles, err := profilesFromConfig(cfg)
+	if err != nil {
+		t.Fatalf("profilesFromConfig() error = %v", err)
+	}
+	if len(profiles) != 2 {
+		t.Fatalf("profiles = %d, want 2", len(profiles))
+	}
+
+	pg := profiles[0]
+	if pg.Name != "local-pg" || pg.Driver != config.DriverPostgres || pg.Kind != db.KindPostgres {
+		t.Errorf("postgres profile = %+v", pg)
+	}
+	if strings.Contains(pg.Detail, "secret") {
+		t.Errorf("postgres detail leaked a password: %q", pg.Detail)
+	}
+
+	notes := profiles[1]
+	if notes.Kind != db.KindSQLite {
+		t.Errorf("sqlite kind = %q, want sqlite", notes.Kind)
+	}
+	if notes.DSN != sqlitePath {
+		t.Errorf("sqlite DSN = %q, want %q", notes.DSN, sqlitePath)
+	}
+}
+
+func TestProfilesFromConfigInvalidSQLite(t *testing.T) {
+	cfg := &config.Config{Connections: []config.Connection{{
+		Name:   "bad",
+		Driver: config.DriverSQLite,
+		DSN:    "postgres://localhost/app",
+	}}}
+
+	_, err := profilesFromConfig(cfg)
+	if err == nil {
+		t.Fatal("profilesFromConfig() error = nil, want driver mismatch")
+	}
+	if !strings.Contains(err.Error(), "driver is sqlite but DSN is postgres") {
+		t.Errorf("error = %q, want driver mismatch", err)
 	}
 }
 
