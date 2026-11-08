@@ -129,6 +129,23 @@ func (f *FakeConn) SetQueryResult(sql string, result db.Result) {
 	f.queryResults[sql] = result
 }
 
+// SetSchemas replaces the catalog's schema list.
+func (f *FakeConn) SetSchemas(schemas []db.Schema) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.schemas = slices.Clone(schemas)
+}
+
+// SetRelations replaces one schema's relation list.
+func (f *FakeConn) SetRelations(schema string, relations []db.Relation) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.relations == nil {
+		f.relations = make(map[string][]db.Relation)
+	}
+	f.relations[schema] = slices.Clone(relations)
+}
+
 // SetCount overrides a relation's count.
 func (f *FakeConn) SetCount(ref db.RelationRef, count db.Count) {
 	f.mu.Lock()

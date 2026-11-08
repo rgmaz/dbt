@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/charmbracelet/bubbles/key"
 	tea "github.com/charmbracelet/bubbletea"
@@ -34,6 +35,11 @@ type Options struct {
 	Version    string
 	ReadOnly   bool
 	Theme      string
+
+	// Conn is the explicit-target session supplied by the CLI. Picker sessions
+	// install their own connection after ConnectResult arrives.
+	Conn         db.Conn
+	QueryTimeout time.Duration
 
 	// Picker selects the connection picker instead of the browser at startup.
 	Picker     bool
@@ -72,9 +78,17 @@ type connectFailedMsg struct {
 	err error
 }
 
+type catalogState struct {
+	seq         uint64
+	schemasOp   uint64
+	relationsOp map[string]uint64
+	ctx         context.Context
+	cancel      context.CancelFunc
+}
+
 // Model is the root Bubble Tea model. It owns global key handling, layout, the
-// help/error modals, async connection state, and the active session, and
-// delegates everything else to the active screen.
+// help/error modals, async connection and catalog state, and the active
+// session, and delegates everything else to the active screen.
 type Model struct {
 	opts  Options
 	theme theme.Theme
@@ -85,6 +99,7 @@ type Model struct {
 	conn          db.Conn
 	connecting    bool
 	connectCancel context.CancelFunc
+	catalog       catalogState
 
 	width, height int
 	ready         bool
@@ -98,6 +113,9 @@ func New(opts Options) Model {
 	if opts.Context == nil {
 		opts.Context = context.Background()
 	}
+	if opts.QueryTimeout <= 0 {
+		opts.QueryTimeout = db.DefaultQueryTimeout
+	}
 
 	th := theme.New(opts.Theme)
 	km := keys.Default()
@@ -106,6 +124,7 @@ func New(opts Options) Model {
 		theme: th,
 		keys:  km,
 	}
+	m.resetCatalog()
 
 	if opts.Picker {
 		m.screen = screen.NewPicker(screen.PickerOptions{
@@ -117,6 +136,7 @@ func New(opts Options) Model {
 		return m
 	}
 
+	m.conn = opts.Conn
 	m.screen = m.browser()
 	return m
 }
@@ -145,12 +165,21 @@ func pickerProfiles(profiles []Profile) []screen.PickerProfile {
 	return out
 }
 
-// Init implements tea.Model.
-func (m Model) Init() tea.Cmd { return nil }
+// Init implements tea.Model. The browser schedules its initial schema load.
+func (m Model) Init() tea.Cmd {
+	if m.screen == nil {
+		return nil
+	}
+	return m.screen.Init()
+}
 
-// Close closes the session opened through the picker. Explicit-target
-// connections are owned by the CLI, so this is a no-op in browser mode.
+// Close cancels catalog work and closes the active session. Explicit-target
+// sessions are passed in by the CLI, which also keeps an idempotent safety-net
+// close.
 func (m Model) Close() error {
+	if m.catalog.cancel != nil {
+		m.catalog.cancel()
+	}
 	if m.connectCancel != nil {
 		m.connectCancel()
 	}
@@ -176,6 +205,22 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.connected(msg)
 	case connectFailedMsg:
 		return m.connectFailed(msg)
+	case screen.LoadSchemasMsg:
+		return m.loadSchemas()
+	case screen.LoadRelationsMsg:
+		return m.loadRelations(msg.Schema)
+	case screen.SchemasLoadedMsg:
+		if msg.OpID != m.catalog.schemasOp {
+			return m, nil
+		}
+		return m.forward(msg)
+	case screen.RelationsLoadedMsg:
+		if m.catalog.relationsOp[msg.Schema] != msg.OpID {
+			return m, nil
+		}
+		return m.forward(msg)
+	case screen.CatalogErrMsg:
+		return m.catalogError(msg)
 	default:
 		return m.forward(msg)
 	}
@@ -234,6 +279,97 @@ func (m Model) ShowError(err error) Model {
 	return m
 }
 
+// resetCatalog invalidates all catalog operations and installs a fresh
+// cancellable context. The sequence counter is never reset so late responses
+// from a previous session cannot match a new operation.
+func (m *Model) resetCatalog() {
+	if m.catalog.cancel != nil {
+		m.catalog.cancel()
+	}
+	m.catalog.ctx, m.catalog.cancel = context.WithCancel(m.opts.Context)
+	m.catalog.schemasOp = 0
+	m.catalog.relationsOp = make(map[string]uint64)
+}
+
+// loadSchemas cancels any in-flight catalog work, invalidates relation loads,
+// and schedules ListSchemas.
+func (m Model) loadSchemas() (tea.Model, tea.Cmd) {
+	if m.conn == nil {
+		return m, nil
+	}
+
+	if m.catalog.cancel != nil {
+		m.catalog.cancel()
+	}
+	m.catalog.ctx, m.catalog.cancel = context.WithCancel(m.opts.Context)
+	m.catalog.seq++
+	op := m.catalog.seq
+	m.catalog.schemasOp = op
+	m.catalog.relationsOp = make(map[string]uint64)
+
+	ctx, cancel := context.WithTimeout(m.catalog.ctx, m.opts.QueryTimeout)
+	conn := m.conn
+	return m, func() tea.Msg {
+		defer cancel()
+		schemas, err := conn.ListSchemas(ctx)
+		if err != nil {
+			return screen.CatalogErrMsg{OpID: op, Scope: screen.ScopeSchemas, Err: err}
+		}
+		return screen.SchemasLoadedMsg{OpID: op, Schemas: schemas}
+	}
+}
+
+// loadRelations schedules ListRelations for one schema. The response is only
+// accepted while its opID remains the latest request for that schema.
+func (m Model) loadRelations(schema string) (tea.Model, tea.Cmd) {
+	if m.conn == nil || strings.TrimSpace(schema) == "" {
+		return m, nil
+	}
+
+	base := m.catalog.ctx
+	if base == nil {
+		base = m.opts.Context
+	}
+	m.catalog.seq++
+	op := m.catalog.seq
+	if m.catalog.relationsOp == nil {
+		m.catalog.relationsOp = make(map[string]uint64)
+	}
+	m.catalog.relationsOp[schema] = op
+
+	ctx, cancel := context.WithTimeout(base, m.opts.QueryTimeout)
+	conn := m.conn
+	return m, func() tea.Msg {
+		defer cancel()
+		relations, err := conn.ListRelations(ctx, schema)
+		if err != nil {
+			return screen.CatalogErrMsg{
+				OpID:   op,
+				Scope:  screen.ScopeRelations,
+				Schema: schema,
+				Err:    err,
+			}
+		}
+		return screen.RelationsLoadedMsg{OpID: op, Schema: schema, Relations: relations}
+	}
+}
+
+func (m Model) catalogError(msg screen.CatalogErrMsg) (tea.Model, tea.Cmd) {
+	switch msg.Scope {
+	case screen.ScopeSchemas:
+		if msg.OpID != m.catalog.schemasOp {
+			return m, nil
+		}
+	case screen.ScopeRelations:
+		if m.catalog.relationsOp[msg.Schema] != msg.OpID {
+			return m, nil
+		}
+	default:
+		return m, nil
+	}
+	return m.forward(msg)
+}
+
 // beginConnect starts an async connection for the selected profile. It is the
 // only place that mutates connection state; database I/O runs in the returned
 // tea.Cmd.
@@ -274,7 +410,9 @@ func (m Model) connected(msg connectedMsg) (tea.Model, tea.Cmd) {
 	m.opts.Kind = msg.result.Kind
 	m.opts.Version = msg.result.Version
 	m.opts.ReadOnly = true
-	return m.SetScreen(m.browser()), nil
+	m.resetCatalog()
+	m = m.SetScreen(m.browser())
+	return m, m.screen.Init()
 }
 
 func (m Model) connectFailed(msg connectFailedMsg) (tea.Model, tea.Cmd) {
@@ -303,6 +441,9 @@ func (m Model) profileByName(name string) (Profile, bool) {
 }
 
 func (m Model) quit() (tea.Model, tea.Cmd) {
+	if m.catalog.cancel != nil {
+		m.catalog.cancel()
+	}
 	if m.connectCancel != nil {
 		m.connectCancel()
 	}

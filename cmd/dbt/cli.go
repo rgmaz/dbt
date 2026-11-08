@@ -143,7 +143,7 @@ func run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 	}
 	defer func() { _ = conn.Close() }()
 
-	return runBrowser(ctx, logger, opts, cfg, resolved, serverVersion, stdin, stdout, stderr)
+	return runBrowser(ctx, logger, opts, cfg, resolved, conn, serverVersion, stdin, stdout, stderr)
 }
 
 func parseArgs(args []string) (options, error) {
@@ -371,17 +371,20 @@ func runBrowser(
 	opts options,
 	cfg *config.Config,
 	resolved target,
+	conn db.Conn,
 	serverVersion string,
 	stdin io.Reader,
 	stdout, stderr io.Writer,
 ) int {
 	model := app.New(app.Options{
-		Context:    ctx,
-		Connection: connectionLabel(opts, resolved),
-		Kind:       resolved.kind,
-		Version:    serverVersion,
-		ReadOnly:   true,
-		Theme:      cfg.Theme,
+		Context:      ctx,
+		Connection:   connectionLabel(opts, resolved),
+		Kind:         resolved.kind,
+		Version:      serverVersion,
+		ReadOnly:     true,
+		Theme:        cfg.Theme,
+		Conn:         conn,
+		QueryTimeout: cfg.QueryTimeout,
 	})
 
 	logger.Info("tui start", "mode", "browser", "kind", resolved.kind, "version", serverVersion)
@@ -419,12 +422,13 @@ func runPicker(
 	}
 
 	model := app.New(app.Options{
-		Context:    ctx,
-		Picker:     true,
-		Profiles:   profiles,
-		ConfigPath: cfg.Path(),
-		Open:       open,
-		Theme:      cfg.Theme,
+		Context:      ctx,
+		Picker:       true,
+		Profiles:     profiles,
+		ConfigPath:   cfg.Path(),
+		Open:         open,
+		Theme:        cfg.Theme,
+		QueryTimeout: cfg.QueryTimeout,
 	})
 
 	logger.Info("tui start", "mode", "picker", "profiles", len(profiles), "config", cfg.Path())

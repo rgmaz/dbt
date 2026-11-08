@@ -1,6 +1,7 @@
 package screen
 
 import (
+	"errors"
 	"strings"
 	"testing"
 
@@ -17,7 +18,7 @@ func TestBrowserShell(t *testing.T) {
 
 	view := b.View()
 	for _, want := range []string{
-		"Schemas", "No schemas loaded", "Data", "Structure", "SQL",
+		"Schemas", "Loading schemas…", "Data", "Structure", "SQL",
 		"No relation selected",
 	} {
 		if !strings.Contains(view, want) {
@@ -65,8 +66,155 @@ func TestBrowserIdentity(t *testing.T) {
 	if b.CapturesText() {
 		t.Error("browser must not capture text")
 	}
-	if b.Init() != nil {
-		t.Error("browser Init() should not schedule a command")
+
+	cmd := b.Init()
+	if cmd == nil {
+		t.Fatal("browser Init() should schedule a schema load")
+	}
+	if _, ok := cmd().(LoadSchemasMsg); !ok {
+		t.Errorf("Init() returned %T, want LoadSchemasMsg", cmd())
+	}
+}
+
+func TestBrowserSchemaLoadAndExpand(t *testing.T) {
+	b := newTestBrowser(t, 100, 30)
+
+	b, cmd := sendBrowser(t, b, SchemasLoadedMsg{Schemas: []db.Schema{{Name: "public"}}})
+	if cmd != nil {
+		t.Errorf("unexpected command after schema load: %T", cmd())
+	}
+	if view := b.View(); !strings.Contains(view, "public") {
+		t.Errorf("browser missing loaded schema:\n%s", view)
+	}
+
+	b, cmd = sendBrowser(t, b, runeKey('l'))
+	if cmd == nil {
+		t.Fatal("expanding a schema did not schedule a relation load")
+	}
+	request, ok := cmd().(LoadRelationsMsg)
+	if !ok {
+		t.Fatalf("expand command returned %T, want LoadRelationsMsg", request)
+	}
+	if request.Schema != "public" {
+		t.Errorf("relation request schema = %q, want public", request.Schema)
+	}
+
+	b, _ = sendBrowser(t, b, RelationsLoadedMsg{
+		Schema: "public",
+		Relations: []db.Relation{
+			{Schema: "public", Name: "users", Kind: db.RelationTable},
+			{Schema: "public", Name: "orders", Kind: db.RelationView},
+		},
+	})
+	view := b.View()
+	for _, want := range []string{"public", "users", "orders", "table", "view"} {
+		if !strings.Contains(view, want) {
+			t.Errorf("browser tree missing %q:\n%s", want, view)
+		}
+	}
+
+	b, _ = sendBrowser(t, b, runeKey('j'))
+	b, _ = sendBrowser(t, b, tea.KeyMsg{Type: tea.KeyEnter})
+	if view := b.View(); !strings.Contains(view, "public.users") {
+		t.Errorf("opened relation not shown in main pane:\n%s", view)
+	}
+}
+
+func TestBrowserFilterCapturesText(t *testing.T) {
+	b := newTestBrowser(t, 100, 30)
+	b, _ = sendBrowser(t, b, SchemasLoadedMsg{Schemas: []db.Schema{{Name: "public"}}})
+
+	b, _ = sendBrowser(t, b, runeKey('/'))
+	if !b.CapturesText() {
+		t.Fatal("filter mode did not capture text")
+	}
+
+	b, _ = sendBrowser(t, b, runeKey('q'))
+	if !b.CapturesText() {
+		t.Fatal("q left filter mode")
+	}
+	if view := b.View(); !strings.Contains(view, "/q_") {
+		t.Errorf("filter input missing q:\n%s", view)
+	}
+
+	b, _ = sendBrowser(t, b, tea.KeyMsg{Type: tea.KeyEnter})
+	if b.CapturesText() {
+		t.Fatal("enter did not leave filter mode")
+	}
+}
+
+func TestBrowserTabFocus(t *testing.T) {
+	b := newTestBrowser(t, 100, 30)
+	b, _ = sendBrowser(t, b, SchemasLoadedMsg{Schemas: []db.Schema{{Name: "public"}}})
+
+	if b.focus != focusSidebar {
+		t.Fatalf("initial focus = %v, want sidebar", b.focus)
+	}
+
+	b = updateBrowser(t, b, tea.KeyMsg{Type: tea.KeyTab})
+	if b.focus != focusMain {
+		t.Fatalf("focus after tab = %v, want main", b.focus)
+	}
+
+	b = updateBrowser(t, b, runeKey('l'))
+	if view := b.View(); strings.Contains(view, "loading") {
+		t.Errorf("sidebar key fired while main was focused:\n%s", view)
+	}
+
+	b = updateBrowser(t, b, tea.KeyMsg{Type: tea.KeyTab})
+	if b.focus != focusSidebar {
+		t.Fatalf("focus after second tab = %v, want sidebar", b.focus)
+	}
+}
+
+func TestBrowserCatalogErrorRedacted(t *testing.T) {
+	b := newTestBrowser(t, 100, 30)
+
+	b, _ = sendBrowser(t, b, CatalogErrMsg{
+		Scope: ScopeSchemas,
+		Err:   errors.New("connection failed: password=secret"),
+	})
+	view := b.View()
+	for _, want := range []string{"connection fai", "r retry"} {
+		if !strings.Contains(view, want) {
+			t.Errorf("catalog error missing %q:\n%s", want, view)
+		}
+	}
+	if strings.Contains(view, "password=secret") {
+		t.Errorf("catalog error leaked a password:\n%s", view)
+	}
+}
+
+func TestBrowserRefreshReloadsExpandedSchemas(t *testing.T) {
+	b := newTestBrowser(t, 100, 30)
+	b, _ = sendBrowser(t, b, SchemasLoadedMsg{Schemas: []db.Schema{{Name: "public"}}})
+	b, _ = sendBrowser(t, b, runeKey('l'))
+	b, _ = sendBrowser(t, b, RelationsLoadedMsg{
+		Schema:    "public",
+		Relations: []db.Relation{{Schema: "public", Name: "users", Kind: db.RelationTable}},
+	})
+
+	b, cmd := sendBrowser(t, b, runeKey('r'))
+	if cmd == nil {
+		t.Fatal("refresh did not schedule a schema load")
+	}
+	if _, ok := cmd().(LoadSchemasMsg); !ok {
+		t.Errorf("refresh command returned %T, want LoadSchemasMsg", cmd())
+	}
+	if view := b.View(); !strings.Contains(view, "refreshing") {
+		t.Errorf("refresh state missing status:\n%s", view)
+	}
+
+	_, cmd = sendBrowser(t, b, SchemasLoadedMsg{Schemas: []db.Schema{{Name: "public"}}})
+	if cmd == nil {
+		t.Fatal("refresh did not reload expanded relations")
+	}
+	request, ok := cmd().(LoadRelationsMsg)
+	if !ok {
+		t.Fatalf("refresh relation command returned %T, want LoadRelationsMsg", request)
+	}
+	if request.Schema != "public" {
+		t.Errorf("refresh relation schema = %q, want public", request.Schema)
 	}
 }
 
@@ -95,14 +243,21 @@ func newTestBrowser(t *testing.T, width, height int) Browser {
 	return updateBrowser(t, b, tea.WindowSizeMsg{Width: width, Height: height})
 }
 
-func updateBrowser(t *testing.T, b Browser, msg tea.Msg) Browser {
+func sendBrowser(t *testing.T, b Browser, msg tea.Msg) (Browser, tea.Cmd) {
 	t.Helper()
 
-	updated, _ := b.Update(msg)
+	updated, cmd := b.Update(msg)
 	next, ok := updated.(Browser)
 	if !ok {
 		t.Fatalf("Update returned %T, want Browser", updated)
 	}
+	return next, cmd
+}
+
+func updateBrowser(t *testing.T, b Browser, msg tea.Msg) Browser {
+	t.Helper()
+
+	next, _ := sendBrowser(t, b, msg)
 	return next
 }
 
