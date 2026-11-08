@@ -201,9 +201,10 @@ type Browser struct {
 	mainErr    string
 
 	// Sorting state for the selected relation.
-	sortCol  int
-	sortDesc bool
-	pageSize int
+	sortCol         int
+	sortDesc        bool
+	pageSize        int
+	sidebarOverride int
 }
 
 // NewBrowser constructs the browser shell.
@@ -380,6 +381,14 @@ func (b Browser) updateKey(msg tea.KeyMsg) (Screen, tea.Cmd) {
 	}
 
 	// sidebar
+	if msg.String() == "+" {
+		b.sidebarOverride++
+		return b, nil
+	}
+	if msg.String() == "-" {
+		b.sidebarOverride--
+		return b, nil
+	}
 	tree, event := b.tree.Update(msg)
 	b.tree = tree
 
@@ -529,12 +538,24 @@ func (b Browser) View() string {
 	return lipgloss.JoinHorizontal(
 		lipgloss.Top,
 		b.sidebarView(sidebarWidth),
-		b.separator(),
 		b.mainView(mainWidth),
 	)
 }
 
 func (b Browser) sidebarWidth() int {
+	if b.sidebarOverride != 0 {
+		w := 20 + b.sidebarOverride
+		if w < 8 {
+			w = 8
+		}
+		if b.width > 0 && w > b.width-20 {
+			w = b.width - 20
+		}
+		if w < 1 {
+			w = 1
+		}
+		return w
+	}
 	if b.width <= 0 {
 		return 0
 	}
@@ -571,38 +592,50 @@ func (b Browser) mainInnerWidth() int {
 }
 
 func (b Browser) sidebarView(width int) string {
-	body := b.tree.View(max(width-2, 1), b.height)
-	return b.opts.Theme.Sidebar.Width(width).Height(b.height).Render(body)
+	style := b.opts.Theme.Pane
+	if b.focus == focusSidebar {
+		style = b.opts.Theme.PaneFocus
+	}
+	body := b.tree.View(max(width-2, 1), b.height-2)
+	return style.Width(width - 2).Height(b.height - 2).Render(body)
 }
 
 func (b Browser) mainView(width int) string {
 	if width <= 0 {
 		return ""
 	}
+	style := b.opts.Theme.Pane
+	if b.focus == focusMain {
+		style = b.opts.Theme.PaneFocus
+	}
 	titleH := 1
-	bodyH := b.height - titleH - 1
+	bodyH := b.height - titleH - 3
 	if bodyH < 1 {
 		bodyH = 1
+	}
+	innerW := width - 2
+	if innerW < 1 {
+		innerW = 1
 	}
 	tabs := b.tabsView()
 	var body string
 	if b.cellModal != nil {
-		body = b.cellModal.Render(width, bodyH)
+		body = b.cellModal.Render(innerW, bodyH)
 	} else {
 		switch b.tab {
 		case TabStructure:
-			body = b.structure.View(width, bodyH)
+			body = b.structure.View(innerW, bodyH)
 		case TabSQL:
-			body = b.sql.View(width, bodyH)
+			body = b.sql.View(innerW, bodyH)
 		default:
-			body = b.data.View(width, bodyH)
+			body = b.data.View(innerW, bodyH)
 		}
 	}
 	content := lipgloss.JoinVertical(lipgloss.Left, tabs, body)
 	if b.mainErr != "" {
 		content = lipgloss.JoinVertical(lipgloss.Left, tabs, b.opts.Theme.Error.Render(runewidth.Truncate("error: "+b.mainErr, width, "…")), body)
 	}
-	return b.opts.Theme.Main.Width(width).Height(b.height).Render(content)
+	return style.Width(width - 2).Height(b.height - 2).Render(content)
 }
 
 func (b Browser) tabsView() string {
@@ -614,7 +647,7 @@ func (b Browser) tabsView() string {
 	for _, item := range tabs {
 		text := " " + item.label + " "
 		if item.tab == b.tab {
-			parts = append(parts, b.opts.Theme.TabActive.Render("["+text+"]"))
+			parts = append(parts, b.opts.Theme.TabActive.Render(text))
 		} else {
 			parts = append(parts, b.opts.Theme.TabInactive.Render(text))
 		}
@@ -622,13 +655,6 @@ func (b Browser) tabsView() string {
 	return strings.Join(parts, " ")
 }
 
-func (b Browser) separator() string {
-	lines := make([]string, b.height)
-	for i := range lines {
-		lines[i] = b.opts.Theme.Dim.Render("│")
-	}
-	return strings.Join(lines, "\n")
-}
 
 // Grid helpers used by browser:
 // need Data() columns/name. Add methods on Grid via component. Let's add here? They belong component; but add wrappers to avoid import issues.

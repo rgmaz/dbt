@@ -175,7 +175,7 @@ func TestBrowserCatalogErrorRedacted(t *testing.T) {
 		Err:   errors.New("connection failed: password=secret"),
 	})
 	view := b.View()
-	for _, want := range []string{"connection fai", "r retry"} {
+	for _, want := range []string{"connection", "r retry"} {
 		if !strings.Contains(view, want) {
 			t.Errorf("catalog error missing %q:\n%s", want, view)
 		}

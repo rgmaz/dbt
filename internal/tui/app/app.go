@@ -668,7 +668,7 @@ func (m Model) headerView() string {
 	if m.pickerActive() {
 		parts = append(parts, "picker")
 	}
-	if connection := strings.TrimSpace(m.opts.Connection); connection != "" {
+	if connection := strings.TrimSpace(db.DSNLabel(m.opts.Connection)); connection != "" {
 		parts = append(parts, connection)
 	}
 	if m.opts.Kind.Valid() {

@@ -25,6 +25,8 @@ type Theme struct {
 	Header       lipgloss.Style
 	Sidebar      lipgloss.Style
 	Main         lipgloss.Style
+	Pane         lipgloss.Style
+	PaneFocus    lipgloss.Style
 	TabActive    lipgloss.Style
 	TabInactive  lipgloss.Style
 	StatusBar    lipgloss.Style
@@ -51,10 +53,18 @@ func Default() Theme {
 			Padding(0, 1),
 		Main: lipgloss.NewStyle().
 			Padding(0, 1),
+		Pane: lipgloss.NewStyle().
+			Border(lipgloss.RoundedBorder()).
+			BorderForeground(muted).
+			Padding(0, 1),
+		PaneFocus: lipgloss.NewStyle().
+			Border(lipgloss.RoundedBorder()).
+			BorderForeground(accent).
+			Padding(0, 1),
 		TabActive: lipgloss.NewStyle().
 			Bold(true).
-			Underline(true).
-			Foreground(accent),
+			Foreground(accent).
+			Background(chrome),
 		TabInactive: lipgloss.NewStyle().
 			Foreground(muted),
 		StatusBar: lipgloss.NewStyle().

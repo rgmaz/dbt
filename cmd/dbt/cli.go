@@ -479,7 +479,7 @@ func connectionLabel(opts options, resolved target) string {
 	if resolved.source == "profile" && strings.TrimSpace(opts.connection) != "" {
 		return opts.connection
 	}
-	return dbtlog.RedactDSN(resolved.dsn)
+	return db.DSNLabel(resolved.dsn)
 }
 
 func isTerminal(v any) bool {

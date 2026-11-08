@@ -468,7 +468,7 @@ func (g Grid) renderHeader(width int) string {
 		}
 		cells = append(cells, style.Render(runewidth.Truncate(padded, w, "…")))
 		if i < len(g.columns)-1 {
-			cells = append(cells, "│")
+			cells = append(cells, "  ")
 		}
 	}
 	line := strings.Join(cells, "")
@@ -502,7 +502,7 @@ func (g Grid) renderRow(rowIdx int, width int) string {
 		}
 		cells = append(cells, runewidth.Truncate(text, w, "…"))
 		if i < len(g.columns)-1 {
-			cells = append(cells, "│")
+			cells = append(cells, "  ")
 		}
 	}
 	line := strings.Join(cells, "")
