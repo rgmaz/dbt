@@ -275,6 +275,47 @@ func TestInterrupted(t *testing.T) {
 	}
 }
 
+func TestInteractiveRequiresTerminal(t *testing.T) {
+	code, stdout, stderr := runCLI(t, context.Background(), ":memory:")
+	if code != exitError {
+		t.Fatalf("exit code = %d, want %d", code, exitError)
+	}
+	if stdout != "" {
+		t.Errorf("stdout = %q, want empty", stdout)
+	}
+	if !strings.Contains(stderr, "requires a terminal") {
+		t.Errorf("stderr = %q, want terminal guidance", stderr)
+	}
+}
+
+func TestConnectionLabel(t *testing.T) {
+	if got := connectionLabel(
+		options{connection: "prod"},
+		target{source: "profile", dsn: "postgres://user:secret@host/db"},
+	); got != "prod" {
+		t.Errorf("profile label = %q, want prod", got)
+	}
+
+	got := connectionLabel(
+		options{},
+		target{source: "dsn", dsn: "postgres://user:secret@host/db?password=hidden"},
+	)
+	for _, secret := range []string{"secret", "hidden"} {
+		if strings.Contains(got, secret) {
+			t.Errorf("dsn label leaked %q: %s", secret, got)
+		}
+	}
+}
+
+func TestIsTerminal(t *testing.T) {
+	if isTerminal(nil) {
+		t.Error("nil is not a terminal")
+	}
+	if isTerminal(&bytes.Buffer{}) {
+		t.Error("buffer is not a terminal")
+	}
+}
+
 func TestDebugLog(t *testing.T) {
 	stateDir := t.TempDir()
 	t.Setenv("XDG_STATE_HOME", stateDir)
@@ -326,7 +367,7 @@ func runCLI(t *testing.T, ctx context.Context, args ...string) (int, string, str
 	t.Setenv("DBT_CONFIG", filepath.Join(t.TempDir(), "config.toml"))
 
 	var stdout, stderr bytes.Buffer
-	code := run(ctx, args, &stdout, &stderr)
+	code := run(ctx, args, strings.NewReader(""), &stdout, &stderr)
 	return code, stdout.String(), stderr.String()
 }
 

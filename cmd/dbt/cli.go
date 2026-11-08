@@ -10,11 +10,15 @@ import (
 	"os"
 	"strings"
 
+	tea "github.com/charmbracelet/bubbletea"
+	"github.com/mattn/go-isatty"
+
 	"github.com/rgmaz/dbt/internal/config"
 	"github.com/rgmaz/dbt/internal/db"
 	"github.com/rgmaz/dbt/internal/db/postgres"
 	"github.com/rgmaz/dbt/internal/db/sqlite"
 	dbtlog "github.com/rgmaz/dbt/internal/log"
+	"github.com/rgmaz/dbt/internal/tui/app"
 )
 
 // Exit codes defined by the CLI contract.
@@ -63,7 +67,7 @@ type target struct {
 	source string
 }
 
-func run(ctx context.Context, args []string, stdout, stderr io.Writer) int {
+func run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 	opts, err := parseArgs(args)
 	if err != nil {
 		if errors.Is(err, flag.ErrHelp) {
@@ -130,9 +134,7 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 		return runCheck(ctx, logger, conn, resolved.kind, stdout, stderr)
 	}
 
-	logger.Info("interactive mode unavailable")
-	writef(stderr, "dbt: interactive TUI is not implemented yet; use --check\n")
-	return exitError
+	return runInteractive(ctx, logger, opts, cfg, resolved, conn, stdin, stdout, stderr)
 }
 
 func parseArgs(args []string) (options, error) {
@@ -289,6 +291,80 @@ func runCheck(ctx context.Context, logger *slog.Logger, conn db.Conn, kind db.Ki
 	writef(stdout, "ok %s %s (read-only)\n", kind, serverVersion)
 	logger.Info("check ok", "kind", kind, "version", serverVersion)
 	return exitOK
+}
+
+func runInteractive(
+	ctx context.Context,
+	logger *slog.Logger,
+	opts options,
+	cfg *config.Config,
+	resolved target,
+	conn db.Conn,
+	stdin io.Reader,
+	stdout, stderr io.Writer,
+) int {
+	if !isTerminal(stdin) || !isTerminal(stdout) {
+		writef(stderr, "dbt: interactive mode requires a terminal; use --check for non-interactive use\n")
+		logger.Warn("interactive mode requires a terminal")
+		return exitError
+	}
+
+	versionCtx, cancel := context.WithTimeout(ctx, db.DefaultConnectTimeout)
+	serverVersion, err := conn.ServerVersion(versionCtx)
+	cancel()
+	if err != nil {
+		return fail(ctx, logger, stderr, exitError, err)
+	}
+
+	model := app.New(app.Options{
+		Connection: connectionLabel(opts, resolved),
+		Kind:       resolved.kind,
+		Version:    serverVersion,
+		ReadOnly:   true,
+		Theme:      cfg.Theme,
+	})
+
+	program := tea.NewProgram(
+		model,
+		tea.WithContext(ctx),
+		tea.WithAltScreen(),
+		tea.WithInput(stdin),
+		tea.WithOutput(stdout),
+	)
+
+	logger.Info("tui start", "kind", resolved.kind, "version", serverVersion)
+	if _, err := program.Run(); err != nil {
+		if errors.Is(err, tea.ErrProgramKilled) && ctx.Err() != nil {
+			writef(stderr, "dbt: interrupted\n")
+			logger.Warn("interrupted")
+			return exitInterrupt
+		}
+		return fail(ctx, logger, stderr, exitError, err)
+	}
+	if ctx.Err() != nil {
+		writef(stderr, "dbt: interrupted\n")
+		logger.Warn("interrupted")
+		return exitInterrupt
+	}
+
+	logger.Info("tui exit")
+	return exitOK
+}
+
+func connectionLabel(opts options, resolved target) string {
+	if resolved.source == "profile" && strings.TrimSpace(opts.connection) != "" {
+		return opts.connection
+	}
+	return dbtlog.RedactDSN(resolved.dsn)
+}
+
+func isTerminal(v any) bool {
+	file, ok := v.(*os.File)
+	if !ok {
+		return false
+	}
+	fd := file.Fd()
+	return isatty.IsTerminal(fd) || isatty.IsCygwinTerminal(fd)
 }
 
 func fail(ctx context.Context, logger *slog.Logger, stderr io.Writer, code int, err error) int {
