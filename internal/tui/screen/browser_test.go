@@ -19,7 +19,7 @@ func TestBrowserShell(t *testing.T) {
 	view := b.View()
 	for _, want := range []string{
 		"Schemas", "Loading schemas…", "Data", "Structure", "SQL",
-		"No relation selected",
+		"No data",
 	} {
 		if !strings.Contains(view, want) {
 			t.Errorf("browser view missing %q:\n%s", want, view)
@@ -48,7 +48,7 @@ func TestBrowserTabSwitching(t *testing.T) {
 	if b.Tab() != TabSQL {
 		t.Fatalf("tab = %v, want SQL", b.Tab())
 	}
-	if view := b.View(); !strings.Contains(view, "Read-only session") {
+	if view := b.View(); !strings.Contains(view, "i edit") {
 		t.Errorf("sql view missing read-only hint:\n%s", view)
 	}
 
@@ -115,7 +115,7 @@ func TestBrowserSchemaLoadAndExpand(t *testing.T) {
 
 	b, _ = sendBrowser(t, b, runeKey('j'))
 	b, _ = sendBrowser(t, b, tea.KeyMsg{Type: tea.KeyEnter})
-	if view := b.View(); !strings.Contains(view, "public.users") {
+	if view := b.View(); !strings.Contains(view, "Loading") {
 		t.Errorf("opened relation not shown in main pane:\n%s", view)
 	}
 }

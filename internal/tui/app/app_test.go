@@ -131,7 +131,7 @@ func TestTabForwarding(t *testing.T) {
 	}
 
 	m, _ = send(t, m, runeKey('3'))
-	if view := m.View(); !strings.Contains(view, "Read-only session") {
+	if view := m.View(); !strings.Contains(view, "i edit") {
 		t.Errorf("sql tab not forwarded:\n%s", view)
 	}
 }

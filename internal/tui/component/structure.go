@@ -134,7 +134,7 @@ func (s Structure) View(width, height int) string {
 		return strings.Join(out, "\n")
 	}
 	if !s.hasData {
-		line := s.opts.Theme.Dim.Render(runewidth.Truncate("No relation selected.", width, "…"))
+		line := s.opts.Theme.Dim.Render(runewidth.Truncate("No relation selected. Select a relation to inspect columns, indexes, and foreign keys.", width, "…"))
 		out := []string{line}
 		for i := 1; i < height; i++ {
 			out = append(out, "")

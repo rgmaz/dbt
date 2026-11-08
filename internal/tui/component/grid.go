@@ -538,3 +538,23 @@ func (g Grid) statusLine(width int) string {
 	}
 	return g.opts.Theme.StatusBar.Render(runewidth.Truncate(text, width, "…"))
 }
+
+// Page returns the current page index.
+func (g Grid) Page() int { return g.page }
+
+// Columns returns the current columns.
+func (g Grid) Columns() []db.ResultColumn { return g.columns }
+
+// ColumnName returns one column's name.
+func (g Grid) ColumnName(i int) string {
+	if i < 0 || i >= len(g.columns) {
+		return ""
+	}
+	return g.columns[i].Name
+}
+
+// SetTotal updates the total row count without replacing rows.
+func (g Grid) SetTotal(total int) Grid {
+	g.total = total
+	return g
+}

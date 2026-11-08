@@ -82,6 +82,10 @@ type catalogState struct {
 	seq         uint64
 	schemasOp   uint64
 	relationsOp map[string]uint64
+	detailOp    uint64
+	pageOp      uint64
+	countOp     uint64
+	queryOp     uint64
 	ctx         context.Context
 	cancel      context.CancelFunc
 }
@@ -221,6 +225,51 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.forward(msg)
 	case screen.CatalogErrMsg:
 		return m.catalogError(msg)
+	case screen.LoadDetailMsg:
+		return m.loadDetail(msg.Ref)
+	case screen.DetailLoadedMsg:
+		if msg.OpID != m.catalog.detailOp {
+			return m, nil
+		}
+		return m.forward(msg)
+	case screen.DetailErrMsg:
+		if msg.OpID != m.catalog.detailOp {
+			return m, nil
+		}
+		return m.forward(msg)
+	case screen.LoadPageMsg:
+		return m.loadPage(msg.Ref, msg.Page, msg.PageSize, msg.Order)
+	case screen.PageLoadedMsg:
+		if msg.OpID != m.catalog.pageOp {
+			return m, nil
+		}
+		return m.forward(msg)
+	case screen.PageErrMsg:
+		if msg.OpID != m.catalog.pageOp {
+			return m, nil
+		}
+		return m.forward(msg)
+	case screen.LoadCountMsg:
+		return m.loadCount(msg.Ref)
+	case screen.CountLoadedMsg:
+		if msg.OpID != m.catalog.countOp {
+			return m, nil
+		}
+		return m.forward(msg)
+	case screen.CountErrMsg:
+		if msg.OpID != m.catalog.countOp {
+			return m, nil
+		}
+		return m.forward(msg)
+	case screen.RunQueryMsg:
+		return m.runQuery(msg.SQL, msg.MaxRows)
+	case screen.QueryDoneMsg:
+		if msg.OpID != m.catalog.queryOp {
+			return m, nil
+		}
+		return m.forward(msg)
+	case screen.ErrModalMsg:
+		return m.ShowError(msg.Err), nil
 	default:
 		return m.forward(msg)
 	}
@@ -289,6 +338,10 @@ func (m *Model) resetCatalog() {
 	m.catalog.ctx, m.catalog.cancel = context.WithCancel(m.opts.Context)
 	m.catalog.schemasOp = 0
 	m.catalog.relationsOp = make(map[string]uint64)
+	m.catalog.detailOp = 0
+	m.catalog.pageOp = 0
+	m.catalog.countOp = 0
+	m.catalog.queryOp = 0
 }
 
 // loadSchemas cancels any in-flight catalog work, invalidates relation loads,
@@ -368,6 +421,115 @@ func (m Model) catalogError(msg screen.CatalogErrMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 	return m.forward(msg)
+}
+
+// loadDetail schedules Describe. The detailOp guards stale responses.
+func (m Model) loadDetail(ref db.RelationRef) (tea.Model, tea.Cmd) {
+	if m.conn == nil {
+		return m, nil
+	}
+	base := m.catalog.ctx
+	if base == nil {
+		base = m.opts.Context
+	}
+	m.catalog.seq++
+	op := m.catalog.seq
+	m.catalog.detailOp = op
+
+	ctx, cancel := context.WithTimeout(base, m.opts.QueryTimeout)
+	conn := m.conn
+	return m, func() tea.Msg {
+		defer cancel()
+		detail, err := conn.Describe(ctx, ref)
+		if err != nil {
+			return screen.DetailErrMsg{OpID: op, Ref: ref, Err: err}
+		}
+		return screen.DetailLoadedMsg{OpID: op, Ref: ref, Detail: detail}
+	}
+}
+
+// loadPage schedules Page. pageOp guards stale responses.
+func (m Model) loadPage(ref db.RelationRef, page, pageSize int, order []db.Order) (tea.Model, tea.Cmd) {
+	if m.conn == nil {
+		return m, nil
+	}
+	if pageSize <= 0 {
+		pageSize = 100
+	}
+	base := m.catalog.ctx
+	if base == nil {
+		base = m.opts.Context
+	}
+	m.catalog.seq++
+	op := m.catalog.seq
+	m.catalog.pageOp = op
+
+	ctx, cancel := context.WithTimeout(base, m.opts.QueryTimeout)
+	conn := m.conn
+	return m, func() tea.Msg {
+		defer cancel()
+		limit := pageSize + 1
+		result, err := conn.Page(ctx, ref, order, limit, page*pageSize)
+		if err != nil {
+			return screen.PageErrMsg{OpID: op, Ref: ref, Err: err}
+		}
+		if result != nil {
+			if len(result.Rows) > pageSize {
+				result.Rows = result.Rows[:pageSize]
+				result.Truncated = true
+			}
+			result.RowCount = len(result.Rows)
+		}
+		return screen.PageLoadedMsg{OpID: op, Ref: ref, Page: page, Result: result}
+	}
+}
+
+// loadCount schedules Count.
+func (m Model) loadCount(ref db.RelationRef) (tea.Model, tea.Cmd) {
+	if m.conn == nil {
+		return m, nil
+	}
+	base := m.catalog.ctx
+	if base == nil {
+		base = m.opts.Context
+	}
+	m.catalog.seq++
+	op := m.catalog.seq
+	m.catalog.countOp = op
+
+	ctx, cancel := context.WithTimeout(base, m.opts.QueryTimeout)
+	conn := m.conn
+	return m, func() tea.Msg {
+		defer cancel()
+		count, err := conn.Count(ctx, ref)
+		if err != nil {
+			return screen.CountErrMsg{OpID: op, Ref: ref, Err: err}
+		}
+		return screen.CountLoadedMsg{OpID: op, Ref: ref, Count: count}
+	}
+}
+func (m Model) runQuery(sql string, maxRows int) (tea.Model, tea.Cmd) {
+	if m.conn == nil {
+		return m, nil
+	}
+	if maxRows <= 0 {
+		maxRows = db.DefaultMaxRows
+	}
+	base := m.catalog.ctx
+	if base == nil {
+		base = m.opts.Context
+	}
+	m.catalog.seq++
+	op := m.catalog.seq
+	m.catalog.queryOp = op
+
+	ctx, cancel := context.WithTimeout(base, m.opts.QueryTimeout)
+	conn := m.conn
+	return m, func() tea.Msg {
+		defer cancel()
+		result, err := conn.Query(ctx, sql, maxRows)
+		return screen.QueryDoneMsg{OpID: op, Result: result, Err: err}
+	}
 }
 
 // beginConnect starts an async connection for the selected profile. It is the
