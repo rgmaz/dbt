@@ -1,0 +1,24 @@
+ dbt · local-pg · postgres · 16.0 (fake) · read-only                            
+╭──────────────────╮╭─────────────────────────────────────────────────────────╮ 
+│ Schemas          ││  Data   Structure   SQL                                 │ 
+│ / filter         ││ id     email                  created_at                │ 
+│ ▾ public         ││ 1      user1@example.com      2026-01-01T00:00:00Z      │ 
+│   users  table   ││ 2      user2@example.com      2026-01-01T01:00:00Z      │ 
+│   orders  view   ││ 3      user3@example.com      2026-01-01T02:00:00Z      │ 
+│                  ││ 4      NULL                   2026-01-01T03:00:00Z      │ 
+│                  ││ 5      user5@example.com      2026-01-01T04:00:00Z      │ 
+│                  ││ 6      user6@example.com      2026-01-01T05:00:00Z      │ 
+│                  ││ 7      user7@example.com      2026-01-01T06:00:00Z      │ 
+│                  ││ 8      user8@example.com      2026-01-01T07:00:00Z      │ 
+│                  ││ 9      user9@example.com      2026-01-01T08:00:00Z      │ 
+│                  ││ 10     user10@example.com     2026-01-01T09:00:00Z      │ 
+│                  ││ 11     NULL                   2026-01-01T10:00:00Z      │ 
+│                  ││ 12     user12@example.com     2026-01-01T11:00:00Z      │ 
+│                  ││ 13     user13@example.com     2026-01-01T12:00:00Z      │ 
+│                  ││ 14     user14@example.com     2026-01-01T13:00:00Z      │ 
+│                  ││ 15     user15@example.com     2026-01-01T14:00:00Z      │ 
+│                  ││ 16     user16@example.com     2026-01-01T15:00:00Z      │ 
+│                  ││  rows 1–100 of 250  ·  h/j/k/l move · n/p page · s sort │ 
+│                  ││ ·…                                                      │ 
+╰──────────────────╯╰─────────────────────────────────────────────────────────╯ 
+ ? help · q quit · tab focus · 1/2/3 tabs                                       

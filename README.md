@@ -329,11 +329,11 @@ DBT_TEST_POSTGRES_DSN='postgres://postgres@127.0.0.1:5432/postgres?sslmode=disab
   go test -race -count=1 ./...
 ```
 
-Golden snapshots live under `internal/tui/component/testdata/golden/`. Regenerate them only after
+Golden snapshots live under `internal/tui/*/testdata/golden/`. Regenerate them only after
 reviewing the diff:
 
 ```sh
-UPDATE_GOLDEN=1 go test ./internal/tui/component
+UPDATE_GOLDEN=1 go test ./internal/tui/...
 ```
 
 ## Project layout
