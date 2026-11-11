@@ -38,6 +38,8 @@ type GridEvent struct {
 	Cell   db.Cell
 	Header string
 	Row    int
+	// Text carries clipboard payloads such as a tab-separated row.
+	Text string
 }
 
 // GridPage carries one page of driver data.
@@ -198,7 +200,12 @@ func (g Grid) Update(msg tea.KeyMsg) (Grid, GridEvent) {
 			return g, GridEvent{Kind: GridEventCopyCell, Cell: cell, Row: g.cursorRow}
 		}
 	case key.Matches(msg, g.opts.Keys.Data.CopyRow):
-		return g, GridEvent{Kind: GridEventCopyRow, Row: g.cursorRow, Page: g.page}
+		return g, GridEvent{
+			Kind: GridEventCopyRow,
+			Row:  g.cursorRow,
+			Page: g.page,
+			Text: g.rowText(g.cursorRow),
+		}
 	case key.Matches(msg, g.opts.Keys.Data.Reload):
 		return g, GridEvent{Kind: GridEventReload, Page: g.page}
 	}
@@ -270,6 +277,24 @@ func (g Grid) focusedCell() (db.Cell, string, bool) {
 		return db.Cell{}, "", false
 	}
 	return row[g.cursorCol], g.columns[g.cursorCol].Name, true
+}
+
+// rowText renders one row as tab-separated values for the clipboard. NULLs
+// copy as "NULL" to match the grid. Out-of-range rows yield an empty string.
+func (g Grid) rowText(rowIdx int) string {
+	if rowIdx < 0 || rowIdx >= len(g.rows) {
+		return ""
+	}
+	row := g.rows[rowIdx]
+	values := make([]string, 0, len(row))
+	for _, cell := range row {
+		if cell.Null {
+			values = append(values, "NULL")
+			continue
+		}
+		values = append(values, cell.Text)
+	}
+	return strings.Join(values, "\t")
 }
 
 func (g Grid) hasNextPage() bool {

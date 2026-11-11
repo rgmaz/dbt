@@ -440,8 +440,7 @@ func (b Browser) handleDataKey(msg tea.KeyMsg) (Screen, tea.Cmd) {
 	case component.GridEventCopyCell:
 		_ = clipboard.WriteAll(ev.Cell.Text)
 	case component.GridEventCopyRow:
-		// best-effort: copy first cell of row as tsv placeholder
-		_ = ev
+		_ = clipboard.WriteAll(ev.Text)
 	case component.GridEventReload:
 		if b.selected == nil {
 			return b, nil

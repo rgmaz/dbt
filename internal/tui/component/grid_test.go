@@ -162,6 +162,24 @@ func (g *Grid) SetCursor(row, col int) Grid {
 func (g Grid) CursorRow() int { return g.cursorRow }
 func (g Grid) CursorCol() int { return g.cursorCol }
 
+func TestGridCopyRowEvent(t *testing.T) {
+	g := newGrid(80, 24)
+	g, _ = updateGrid(t, g, runeKey('j'))
+	g, ev := updateGrid(t, g, runeKey('Y'))
+	if ev.Kind != GridEventCopyRow {
+		t.Fatalf("Y event = %+v, want copy row", ev)
+	}
+	if ev.Text != "2\tb@x.com" {
+		t.Errorf("copy row text = %q, want %q", ev.Text, "2\tb@x.com")
+	}
+
+	g, _ = updateGrid(t, g, runeKey('j'))
+	_, ev = updateGrid(t, g, runeKey('Y'))
+	if ev.Text != "3\tNULL" {
+		t.Errorf("copy NULL row text = %q, want %q", ev.Text, "3\tNULL")
+	}
+}
+
 func updateGrid(t *testing.T, g Grid, msg tea.Msg) (Grid, GridEvent) {
 	t.Helper()
 	key, ok := msg.(tea.KeyMsg)
