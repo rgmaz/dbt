@@ -218,6 +218,36 @@ func TestBrowserRefreshReloadsExpandedSchemas(t *testing.T) {
 	}
 }
 
+func TestBrowserSQLExecuteRecordsHistory(t *testing.T) {
+	b := newTestBrowser(t, 100, 30)
+	b = updateBrowser(t, b, runeKey('3'))
+	b = updateBrowser(t, b, tea.KeyMsg{Type: tea.KeyTab})
+	b = updateBrowser(t, b, runeKey('i'))
+	for _, r := range "select 1" {
+		b = updateBrowser(t, b, runeKey(r))
+	}
+
+	b, cmd := sendBrowser(t, b, tea.KeyMsg{Type: tea.KeyCtrlJ})
+	if cmd == nil {
+		t.Fatal("execute did not schedule a query")
+	}
+	request, ok := cmd().(RunQueryMsg)
+	if !ok {
+		t.Fatalf("execute command returned %T, want RunQueryMsg", cmd())
+	}
+	if request.SQL != "select 1" {
+		t.Errorf("query SQL = %q, want %q", request.SQL, "select 1")
+	}
+
+	// Clear the editor, then recall the executed statement from history.
+	b = updateBrowser(t, b, tea.KeyMsg{Type: tea.KeyCtrlL})
+	b = updateBrowser(t, b, tea.KeyMsg{Type: tea.KeyEsc})
+	b = updateBrowser(t, b, tea.KeyMsg{Type: tea.KeyCtrlR})
+	if view := b.View(); !strings.Contains(view, "select 1") {
+		t.Errorf("executed statement missing from history:\n%s", view)
+	}
+}
+
 func TestBrowserNarrowLayout(t *testing.T) {
 	b := newTestBrowser(t, 40, 20)
 	view := b.View()

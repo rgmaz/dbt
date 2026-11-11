@@ -242,7 +242,7 @@ Press `?` at any time for the help overlay.
 | --- | --- |
 | `i` | Enter insert mode |
 | `esc` | Return to normal mode |
-| `ctrl+enter` | Execute the query |
+| `ctrl+j` | Execute the query |
 | `ctrl+r` | Cycle session history |
 | `ctrl+l` | Clear the editor |
 

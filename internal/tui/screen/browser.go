@@ -468,6 +468,7 @@ func (b Browser) currentOrder() []db.Order {
 func (b Browser) handleSQLEvent(ev component.SQLEvent) (Screen, tea.Cmd) {
 	switch ev.Kind {
 	case component.SQLEventExecute:
+		b.sql = b.sql.AddHistory(ev.SQL)
 		return b, runQueryCmd(ev.SQL, db.DefaultMaxRows)
 	case component.SQLEventClear:
 		// nothing extra

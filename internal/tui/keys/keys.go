@@ -129,7 +129,7 @@ func Default() Map {
 		SQL: SQL{
 			Edit:    binding([]string{"i"}, "i", "edit"),
 			Normal:  binding([]string{"esc"}, "esc", "normal"),
-			Execute: binding([]string{"ctrl+enter"}, "ctrl+enter", "execute"),
+			Execute: binding([]string{"ctrl+j", "ctrl+enter"}, "ctrl+j", "execute"),
 			History: binding([]string{"ctrl+r"}, "ctrl+r", "history"),
 			Clear:   binding([]string{"ctrl+l"}, "ctrl+l", "clear"),
 		},

@@ -182,7 +182,7 @@ func (s SQL) statusLine(width int) string {
 	if s.editing {
 		mode = "insert"
 	}
-	hint := "i edit · esc normal · ctrl+enter run · ctrl+l clear · ctrl+r history"
+	hint := "i edit · esc normal · ctrl+j run · ctrl+l clear · ctrl+r history"
 	text := "SQL (" + mode + ")  " + hint
 	return s.opts.Theme.StatusBar.Render(runewidth.Truncate(text, width, "…"))
 }

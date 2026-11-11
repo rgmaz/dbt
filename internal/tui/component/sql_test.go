@@ -69,6 +69,23 @@ func TestSQLHistory(t *testing.T) {
 	}
 }
 
+func TestSQLExecuteKey(t *testing.T) {
+	s := newSQL(80, 24)
+	s, _ = s.Update(runeKey('i'))
+	s.editor.SetValue("select 1")
+
+	s, ev := s.Update(tea.KeyMsg{Type: tea.KeyCtrlJ})
+	if ev.Kind != SQLEventExecute {
+		t.Fatalf("event = %+v, want execute", ev)
+	}
+	if ev.SQL != "select 1" {
+		t.Errorf("execute SQL = %q, want %q", ev.SQL, "select 1")
+	}
+	if !s.CapturesText() {
+		t.Error("execute should keep the editor focused")
+	}
+}
+
 func TestSQLRunningState(t *testing.T) {
 	s := newSQL(80, 24)
 	s = s.SetRunning(true)
