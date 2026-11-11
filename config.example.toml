@@ -1,0 +1,40 @@
+# dbt example configuration
+#
+# Copy to the default location (usually ~/.config/dbt/config.toml) or point at
+# it with `dbt --config ./config.example.toml`.
+#
+# Resolution order: --config, $DBT_CONFIG, $XDG_CONFIG_HOME/dbt/config.toml,
+# then the platform user config directory.
+#
+# All keys are optional except the required fields of each [[connection]].
+# Unknown keys are rejected.
+
+# Rows fetched per page. Range: 10-2000. Default: 100.
+page_size = 100
+
+# Per-query deadline (Go duration). Default: 30s.
+query_timeout = "30s"
+
+# Reserved; unknown names fall back to the default theme.
+theme = "default"
+
+# SQLite profile. Plain paths and "sqlite:" prefixes are accepted.
+# A leading "~" is expanded, and ${VAR} references are interpolated at load
+# time. Plain paths are opened read-only and are never created.
+[[connection]]
+name = "notes"
+driver = "sqlite"
+dsn = "~/data/notes.db"
+default_schema = "main"
+
+# PostgreSQL profile. Prefer .pgpass or PGPASSWORD over inline passwords.
+# If a password is unavoidable, reference an environment variable:
+#   dsn = "postgres://app:${PGPASSWORD}@localhost:5432/app?sslmode=disable"
+[[connection]]
+name = "local"
+driver = "postgres"
+dsn = "postgres://app@localhost:5432/app?sslmode=disable"
+default_schema = "public"
+
+# read_only may be omitted or set to true. `read_only = false` is a
+# configuration error: writes are not supported in this version.
