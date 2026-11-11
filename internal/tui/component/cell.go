@@ -28,7 +28,7 @@ func (m CellModal) Render(width, height int) string {
 	}
 	inner := boxWidth - 2
 	title := m.Theme.ModalTitle.Render(m.Title)
-	panel := m.Theme.Modal.Width(inner).Render(title + "\n\n" + m.display())
+	panel := m.Theme.Modal.Width(inner).Render(title + "\n\n" + m.display() + "\n\nesc: close")
 	return panel
 }
 

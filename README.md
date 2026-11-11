@@ -186,7 +186,8 @@ default_schema = "public" # optional; defaults to "public"
 3. A `${PGPASSWORD}` reference inside the DSN, expanded at load time.
 
 Passwords are redacted from debug logs, error messages, and the TUI header. The header shows a
-compact `user@database` label (or the SQLite file name), never the full DSN.
+compact `user@database` label for PostgreSQL DSNs, the connection profile name when one is used,
+or the SQLite file name — never the full DSN.
 
 ## Keymaps
 

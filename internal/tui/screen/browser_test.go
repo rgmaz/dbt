@@ -248,6 +248,69 @@ func TestBrowserSQLExecuteRecordsHistory(t *testing.T) {
 	}
 }
 
+func TestBrowserCellModalDismiss(t *testing.T) {
+	b := browserWithUsers(t)
+	ref := db.Relation{Schema: "public", Name: "users"}.Ref()
+	b, _ = sendBrowser(t, b, PageLoadedMsg{Ref: ref, Page: 0, Result: &db.Result{
+		Columns: []db.ResultColumn{{Name: "id"}},
+		Rows:    [][]db.Cell{{{Text: "42"}}},
+	}})
+	b = updateBrowser(t, b, tea.KeyMsg{Type: tea.KeyTab})
+
+	b, _ = sendBrowser(t, b, tea.KeyMsg{Type: tea.KeyEnter})
+	view := b.View()
+	for _, want := range []string{"42", "esc: close"} {
+		if !strings.Contains(view, want) {
+			t.Fatalf("cell modal missing %q:\n%s", want, view)
+		}
+	}
+
+	// The modal owns the keyboard: navigation must not leak through.
+	b = updateBrowser(t, b, runeKey('j'))
+	if !strings.Contains(b.View(), "esc: close") {
+		t.Fatalf("j dismissed the cell modal:\n%s", b.View())
+	}
+
+	b = updateBrowser(t, b, tea.KeyMsg{Type: tea.KeyEsc})
+	if strings.Contains(b.View(), "esc: close") {
+		t.Errorf("esc did not dismiss the cell modal:\n%s", b.View())
+	}
+}
+
+func TestBrowserPageErrorClearsOnReload(t *testing.T) {
+	b := browserWithUsers(t)
+	ref := db.Relation{Schema: "public", Name: "users"}.Ref()
+
+	b, _ = sendBrowser(t, b, PageErrMsg{Ref: ref, Err: errors.New("connection lost")})
+	if view := b.View(); !strings.Contains(view, "connection lost") {
+		t.Fatalf("page error not rendered:\n%s", view)
+	}
+
+	b, _ = sendBrowser(t, b, PageLoadedMsg{Ref: ref, Page: 0, Result: &db.Result{
+		Columns: []db.ResultColumn{{Name: "id"}},
+		Rows:    [][]db.Cell{{{Text: "7"}}},
+	}})
+	if view := b.View(); strings.Contains(view, "connection lost") {
+		t.Errorf("page error persisted after a successful reload:\n%s", view)
+	}
+}
+
+// browserWithUsers returns a browser with public.users selected.
+func browserWithUsers(t *testing.T) Browser {
+	t.Helper()
+
+	b := newTestBrowser(t, 100, 30)
+	b, _ = sendBrowser(t, b, SchemasLoadedMsg{Schemas: []db.Schema{{Name: "public"}}})
+	b, _ = sendBrowser(t, b, runeKey('l'))
+	b, _ = sendBrowser(t, b, RelationsLoadedMsg{
+		Schema:    "public",
+		Relations: []db.Relation{{Schema: "public", Name: "users", Kind: db.RelationTable}},
+	})
+	b, _ = sendBrowser(t, b, runeKey('j'))
+	b, _ = sendBrowser(t, b, tea.KeyMsg{Type: tea.KeyEnter})
+	return b
+}
+
 func TestBrowserNarrowLayout(t *testing.T) {
 	b := newTestBrowser(t, 40, 20)
 	view := b.View()

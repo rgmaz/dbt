@@ -282,6 +282,7 @@ func (b Browser) Update(msg tea.Msg) (Screen, tea.Cmd) {
 		if b.selected == nil || msg.Ref != b.selected.Ref() {
 			break
 		}
+		b.mainErr = ""
 		page := msg.Page
 		gp := component.GridPage{
 			Columns:   []db.ResultColumn{},
@@ -315,6 +316,7 @@ func (b Browser) Update(msg tea.Msg) (Screen, tea.Cmd) {
 		if b.selected == nil || msg.Ref != b.selected.Ref() {
 			break
 		}
+		b.mainErr = ""
 		countVal := 0
 		if msg.Count.Exact {
 			countVal = int(msg.Count.Value)
@@ -340,6 +342,14 @@ func (b Browser) Update(msg tea.Msg) (Screen, tea.Cmd) {
 }
 
 func (b Browser) updateKey(msg tea.KeyMsg) (Screen, tea.Cmd) {
+	// The cell modal owns the keyboard until dismissed.
+	if b.cellModal != nil {
+		if key.Matches(msg, b.opts.Keys.Global.Back) {
+			b.cellModal = nil
+		}
+		return b, nil
+	}
+
 	// Tab switching first.
 	if !b.tree.CapturesText() && !b.sql.CapturesText() {
 		switch {
@@ -399,6 +409,7 @@ func (b Browser) updateKey(msg tea.KeyMsg) (Screen, tea.Cmd) {
 		rel := event.Relation
 		b.selected = &rel
 		b.dataTotal = 0
+		b.mainErr = ""
 		b.data = b.data.SetLoading(true)
 		btab := b
 		b.structure = b.structure.SetLoading(true)
