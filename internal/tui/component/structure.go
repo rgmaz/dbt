@@ -4,9 +4,9 @@ import (
 	"fmt"
 	"strings"
 
-	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/bubbles/key"
 	"github.com/charmbracelet/bubbles/viewport"
+	tea "github.com/charmbracelet/bubbletea"
 	"github.com/mattn/go-runewidth"
 
 	"github.com/rgmaz/dbt/internal/db"
@@ -278,4 +278,3 @@ func (s *Structure) rebuild() {
 	s.lines = lines
 	s.viewport.SetContent(strings.Join(lines, "\n"))
 }
-

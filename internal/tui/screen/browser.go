@@ -5,8 +5,8 @@ import (
 	"strings"
 
 	"github.com/atotto/clipboard"
-	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/bubbles/key"
+	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/mattn/go-runewidth"
 
@@ -113,9 +113,9 @@ type LoadCountMsg struct {
 
 // CountErrMsg is a failed Count request.
 type CountErrMsg struct {
-	OpID  uint64
-	Ref   db.RelationRef
-	Err   error
+	OpID uint64
+	Ref  db.RelationRef
+	Err  error
 }
 
 // QueryDoneMsg is a SQL query result.
@@ -195,10 +195,10 @@ type Browser struct {
 	sql       component.SQL
 
 	// MainPane state.
-	dataTotal    int
+	dataTotal int
 
 	cellModal *component.CellModal
-	mainErr    string
+	mainErr   string
 
 	// Sorting state for the selected relation.
 	sortCol         int
@@ -210,8 +210,8 @@ type Browser struct {
 // NewBrowser constructs the browser shell.
 func NewBrowser(opts BrowserOptions) Browser {
 	b := Browser{
-		opts:     opts,
-		focus:    focusSidebar,
+		opts:  opts,
+		focus: focusSidebar,
 		tree: component.NewTree(component.TreeOptions{
 			Theme: opts.Theme,
 			Keys:  opts.Keys,
@@ -654,7 +654,6 @@ func (b Browser) tabsView() string {
 	}
 	return strings.Join(parts, " ")
 }
-
 
 // Grid helpers used by browser:
 // need Data() columns/name. Add methods on Grid via component. Let's add here? They belong component; but add wrappers to avoid import issues.

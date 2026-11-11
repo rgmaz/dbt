@@ -42,10 +42,10 @@ type SQL struct {
 
 	width, height int
 
-	editor     textarea.Model
-	editing    bool
+	editor  textarea.Model
+	editing bool
 
-	result Grid
+	result  Grid
 	history []string
 	histIdx int
 
@@ -272,4 +272,3 @@ func (s SQL) Update(msg tea.KeyMsg) (SQL, SQLEvent) {
 	}
 	return s, SQLEvent{}
 }
-
